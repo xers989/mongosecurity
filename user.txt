@@ -1,0 +1,11 @@
+db.getSiblingDB("$external").runCommand(
+  {
+    createUser: "CN=mongod1.example.com,OU=App-Team,O=Example,L=BLR,ST=Karnataka,C=IN",
+    roles: [
+         { role: "readWrite", db: "test" },
+         { role: "userAdminAnyDatabase", db: "admin" }
+    ],
+    writeConcern: { w: "majority" , wtimeout: 5000 }
+  }
+)
+
