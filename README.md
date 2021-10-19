@@ -254,7 +254,7 @@ $ curl --location --request GET 'http://localhost:3000/handson'
 ````
 
 Sniffing the connection between nodejs and mongodb cluster with wireShark
-<img src="/images/image01.png" width="70%" height="70%">     
+<img src="/images/image01.png" width="90%" height="90%">     
 
 
 #### 5. Login with X509
@@ -280,5 +280,100 @@ Enterprise tlsdemo [direct: primary] test>
 ````
 
 
-### MongoDB TLS
+### MongoDB Client Side Encryption
+#### 1. Generate Master Key & Running Nodejs
+Clietn Side Encryption is running with Local Master key.
+To generate the master key, run following command.
 
+````
+$ node makemasterkey.js            
+$ cat master-key.txt
+u�ȸ�?��W��h��J$1�������v��s@u��{
+�C���,Y�b��i�J�Q����F)Y��Mq]$�ޛ�~��o�/"�ч���/T-L%J�"��%                                       
+
+````
+
+Running the nodejs application
+
+````
+$ npm start     
+
+> node2@1.0.0 start
+> nodemon index
+
+[nodemon] 2.0.13
+[nodemon] to restart at any time, enter `rs`
+[nodemon] watching path(s): *.*
+[nodemon] watching extensions: js,mjs,json
+[nodemon] starting `node index index.js`
+../tls/ca-public.crt
+../tls/client.pem
+3000  is waiting to connect                                  
+
+````
+
+#### 2. REST API invoke
+The node application has 2 rest api to test Client Side Field Encryption.
+Retrieve API (GET)
+````
+$ curl --location --request GET 'http://localhost:3000/csfe'
+````
+
+Upsert API (POST)
+````
+$ curl --location --request POST 'http://localhost:3000/csfe' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+        "ssn": "123-001-12345",
+        "address": {
+            "street": "Seoul Jongro-gu, Sejon-ru ",
+            "city": "Seoul",
+            "zip": 123142
+        },
+        "name": "Kyudong",
+        "phone": "010-2345-9999"
+}'
+````
+
+Client side data is plaintext and login to the cluster and verify the stored data.
+````
+% mongosh --tls --host ip-10-0-0-219.ap-northeast-2.compute.internal:27001 --tlsCAFile ./ca-public.crt --authenticationDatabase '$external' --authenticationMechanism MONGODB-X509  --tlsCertificateKeyFile ./client.pem
+Current Mongosh Log ID:	616e30f69eca50943a7ea0ee
+Connecting to:		mongodb://ip-10-0-0-219.ap-northeast-2.compute.internal:27001/?directConnection=true
+Using MongoDB:		5.0.3
+Using Mongosh:		1.0.5
+
+For mongosh info see: https://docs.mongodb.com/mongodb-shell/
+
+------
+   The server generated these startup warnings when booting:
+   2021-10-18T13:07:33.109+00:00: Server certificate has no compatible Subject Alternative Name. This may prevent TLS clients from connecting
+------
+
+Enterprise tlsdemo [direct: primary] test> db.csfehandson.find()
+[
+  {
+    _id: ObjectId("616d7faa757721bcfa0a77b4"),
+    ssn: '123-001-0999',
+    address: {
+      street: Binary(Buffer.from("01933ffba0218843dfba7af389db6ba63d021d0acf65402a424012b84204b1ba48dc0c15ef22764f35a2a2bd6b69600564002a56f704d349976a4e7eacbf968f3efbfd8f470935ad680b7c8c898de88e20bdca4db9da6bee4bb20748cf5de485275d", "hex"), 6),
+      city: 'Seoul',
+      zip: Binary(Buffer.from("01933ffba0218843dfba7af389db6ba63d10017ddc1aed233ea0c569ddd6821dd69ea495bd57cdcbcf2a5fa73e7c82f9555aa1f1f44c6a05d8dab5eddc1074b3107102e74bc930dfdb8f807e51d4dae4d985", "hex"), 6)
+    },
+    name: 'Hong Gil dong',
+    phone: Binary(Buffer.from("02933ffba0218843dfba7af389db6ba63d02037858c16352ae56e81cc3fab39592087464a01498dbb4937ce37ca9638a30c4dbfd9729104f524fb2443a5a6f9921d9e949da3a99ec1f11388b3777dad6640e54abf70aed15c1f928f635640b50fd19", "hex"), 6)
+  },
+  {
+    _id: ObjectId("616e2307757721bcfa0c0929"),
+    ssn: '123-001-12345',
+    address: {
+      street: Binary(Buffer.from("01933ffba0218843dfba7af389db6ba63d021d0acf65402a424012b84204b1ba48dc0c15ef22764f35a2a2bd6b69600564002a56f704d349976a4e7eacbf968f3efbfd8f470935ad680b7c8c898de88e20bdca4db9da6bee4bb20748cf5de485275d", "hex"), 6),
+      city: 'Seoul',
+      zip: Binary(Buffer.from("01933ffba0218843dfba7af389db6ba63d10017ddc1aed233ea0c569ddd6821dd69ea495bd57cdcbcf2a5fa73e7c82f9555aa1f1f44c6a05d8dab5eddc1074b3107102e74bc930dfdb8f807e51d4dae4d985", "hex"), 6)
+    },
+    name: 'Kyudong',
+    phone: Binary(Buffer.from("02933ffba0218843dfba7af389db6ba63d0296c226e12f5b2c2d74d31a0402d8f2514b4c1eb09a3fddbd2ec1ac9ab3a305932d4c06f221824d31c93176e7f8bbc250084086085acf86a2b3374e693556980017ebe7a2a047214f6d8f1c0a8cc664fa", "hex"), 6)
+  }
+]
+
+````
