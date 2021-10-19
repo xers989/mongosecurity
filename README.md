@@ -465,10 +465,10 @@ createJsonSchemaMap(dataKey) {
 To test KMIP, ent. vault is required.
 Sign up hashicorp and download vault enterprise version.
 
-Vault Enterprise version
+Vault Enterprise version    
 https://learn.hashicorp.com/tutorials/vault/kmip-engine?in=vault/enterprise
 
-Enterprise Download
+Enterprise Download    
 https://releases.hashicorp.com/
 
 Unzip the download file.
@@ -669,7 +669,8 @@ Check the key.store information.
 ├── _mdb_catalog.wt
 ├── mongod.lock
 `````
-The encryption information is changed, the data encryption key is encrypted with the new master key.
+The encryption information is changed, the data encryption key is encrypted with the new master key.    
 
 
+<img src="/images/image05.png" width="90%" height="90%">   
 
