@@ -377,3 +377,299 @@ Enterprise tlsdemo [direct: primary] test> db.csfehandson.find()
 ]
 
 ````
+
+#### 3. Reviewing the CSFE Nodejs code
+The REST Api is provided from csfehandson.js & utility script is in helpers.js
+
+In helpers.js, there is MongoDB connection string.
+There are two types of connection string.
+One is CSFE connection string and the other is normal connection string.
+
+Line 35 and 126, 
+
+````
+connectionString = 'mongodb://'+userName+'@' + mongodbserver + ':27001/?replicaSet=tlsdemo&authMechanism=MONGODB-X509&directConnection=true&retryWrites=false&w=majority&ReadPreference=primaryPreferred',
+..
+const client = new MongoClient(this.connectionString, {
+        tls: true,
+        tlsAllowInvalidHostnames: true, 
+        tlsCAFile: cafile, 
+        tlsCertificateKeyFile: cerfikey,
+        useNewUrlParser: true,
+      });
+
+..
+const client = new MongoClient(this.connectionWriteString, {
+        tls: true,
+        tlsAllowInvalidHostnames: true, 
+        tlsCAFile: cafile, 
+        tlsCertificateKeyFile: cerfikey,
+        useNewUrlParser: true,
+        monitorCommands: true,
+        autoEncryption: {
+          keyVaultNamespace: this.keyVaultNamespace,
+          kmsProviders: this.kmsProviders,
+          schemaMap,
+        },
+      });
+     
+````
+CSFE Connection is used in CSFE and regular connection is used in retrieve encryption data key file.
+The difference between two connections is having autoEncryption option (CSFE collection schema information)
+
+If you want to change field encryption option, revise the schema option in helpers.js    
+The encryption module in nodejs
+
+````
+createJsonSchemaMap(dataKey) {
+      return {
+        "test.csfehandson": {
+          bsonType: "object",
+          encryptMetadata: {
+            keyId: [new Binary(Buffer.from(dataKey, "base64"), 4)],
+          },
+          properties: {
+            address: {
+              bsonType: "object",
+              properties: {
+                street: {
+                  encrypt: {
+                    bsonType: "string",
+                    algorithm: "AEAD_AES_256_CBC_HMAC_SHA_512-Deterministic",
+                  },
+                },
+                zip: {
+                  encrypt: {
+                    bsonType: "int",
+                    algorithm: "AEAD_AES_256_CBC_HMAC_SHA_512-Deterministic",
+                  },
+                },
+              },
+            },
+            phone: {
+              encrypt: {
+                bsonType: "string",
+                algorithm: "AEAD_AES_256_CBC_HMAC_SHA_512-Random",
+              },
+            }
+          },
+        },
+      }
+````
+
+<img src="/images/image02.png" width="90%" height="90%">   
+
+
+### Encrypt Storage with Vault
+#### 1. Install vault
+To test KMIP, ent. vault is required.
+Sign up hashicorp and download vault enterprise version.
+
+Vault Enterprise version
+https://learn.hashicorp.com/tutorials/vault/kmip-engine?in=vault/enterprise
+
+Enterprise Download
+https://releases.hashicorp.com/
+
+Unzip the download file.
+Set environment option to put vault license
+````
+$ export VAULT_LICENSE= <<license string>>
+````
+You can get the license string while sign-up.
+
+Start vault server
+`````
+$ vault server -dev -dev-root-token-id=root
+==> Vault server configuration:
+
+             Api Address: http://127.0.0.1:8200
+                     Cgo: disabled
+         Cluster Address: https://127.0.0.1:8201
+              Go Version: go1.16.7
+              Listener 1: tcp (addr: "127.0.0.1:8200", cluster address: "127.0.0.1:8201", max_request_duration: "1m30s", max_request_size: "33554432", tls: "disabled")
+               Log Level: info
+                   Mlock: supported: true, enabled: false
+           Recovery Mode: false
+                 Storage: inmem
+                 Version: Vault v1.8.2+ent
+             Version Sha: bf22e1eb262e59f08bb8a1374dc726ab93830178
+
+==> Vault server started! Log data will stream in below:
+`````
+Warning the vault server is running without storage. So, if the server is killed, all config in vault is also gone.
+
+#### 2. Config Vault
+Open new terminal and enable KMIP.
+
+Step1 : Enable & Configure KMIP secrets engine
+````
+$ export VAULT_ADDR='http://127.0.0.1:8200'
+$ vault secrets enable kmip
+Success! Enabled the kmip secrets engine at: kmip/
+`````
+
+Step2 : Enable the port
+````
+$ vault write kmip/config listen_addrs=0.0.0.0:5696
+Success! Data written to: kmip/config
+`````
+
+Step3 : Generate CA of vault
+`````
+$ vault write kmip/config listen_addrs=0.0.0.0:5696 \
+>       tls_ca_key_type="rsa" \
+>       tls_ca_key_bits=2048
+Success! Data written to: kmip/config
+
+$ vault read kmip/ca > ca.pem
+`````
+
+Step4 : Create Scope and Role    
+Scope name is handson and Role name is keyowner.   
+`````
+$ ./vault write -f kmip/scope/handson
+Success! Data written to: kmip/scope/handson
+$ ./vault write -f kmip/scope/handson
+Success! Data written to: kmip/scope/handson
+$ ./vault write kmip/scope/handson/role/keyowner operation_all=true
+Success! Data written to: kmip/scope/handson/role/keyowner
+$ vault read kmip/scope/handson/role/keyowner
+Key                    Value
+---                    -----
+operation_all          true
+tls_client_key_bits    0
+tls_client_key_type    n/a
+
+`````
+
+Step5 : Generate vault Certificate and download it.
+`````
+$ ./vault write -format=json kmip/scope/handson/role/keyowner/credential/generate format=pem > credential.json
+$ jq -r .data.certificate < credential.json > cert.pem
+$ jq -r .data.private_key < credential.json > key.pem
+$ cat cert.pem key.pem > client.pem
+`````
+
+
+#### 2. Revise Config
+Enable KMIP in MongoDB configuration.   
+
+Node3
+`````
+storage:
+  dbPath: "/data/mongodb/db3"
+systemLog:
+  path: "/data/mongodb/logs/mongod3.log"
+  destination: "file"
+net:
+  bindIp : "localhost,ip-10-0-0-219.ap-northeast-2.compute.internal"
+  port: 27003
+  tls:
+    mode: requireTLS
+    certificateKeyFile: /data/cert/server3.pem
+    CAFile: /data/cert/ca-public.crt
+    clusterFile: /data/cert/server3.pem
+security:
+  authorization: enabled
+  clusterAuthMode: x509
+  enableEncryption: true
+  kmip:
+    serverName: localhost
+    port: 5696
+    serverCAFile: /data/vault/ca.pem
+    clientCertificateFile: /data/vault/client.pem
+replication:
+  replSetName: tlsdemo
+processManagement:
+  fork: true
+`````
+enableEncryption and set up kmip information.
+MongoDB instance will access the vault server with the kmip information (ServerName, certificate)   
+Before running the node3, make the node3 as secondary and down the server.   
+Delete all files of database and running it.
+When the node3 is joining, existing data is replicated from primary and also the database files will be encrypted automatically.   
+
+#### 3. Running MongoDB node
+After running the instance. key.store folder is created under database folder.
+
+`````
+[ec2-user@ip-10-0-0-219 db3]$ tree
+.
+├── collection-0-2954340439062341584.wt
+├── collection-8-2954340439062341584.wt
+├── diagnostic.data
+│   ├── metrics.2021-10-18T15-59-04Z-00000
+│   └── metrics.interim
+├── index-11-2954340439062341584.wt
+├── index-1-2954340439062341584.wt\
+├── index-9-2954340439062341584.wt
+├── journal
+│   ├── WiredTigerLog.0000000002
+│   ├── WiredTigerPreplog.0000000001
+│   └── WiredTigerPreplog.0000000002
+├── key.store
+│   ├── keystore.metadata
+│   └── qFFieCKHkVG9C9fRkwCS62CPALRzslSx
+│       ├── keystore.wt
+│       ├── WiredTiger
+│       ├── WiredTigerHS.wt
+│       ├── WiredTiger.lock
+│       ├── WiredTigerLog.0000000001
+│       ├── WiredTigerPreplog.0000000001
+│       ├── WiredTigerPreplog.0000000002
+│       ├── WiredTiger.turtle
+│       └── WiredTiger.wt
+├── _mdb_catalog.wt
+├── mongod.lock
+├── sizeStorer.wt
+├── storage.bson
+├── WiredTiger
+├── WiredTigerHS.wt
+├── WiredTiger.lock
+├── WiredTiger.turtle
+└── WiredTiger.wt
+
+4 directories, 71 files
+`````
+
+<img src="/images/image03.png" width="90%" height="90%">   
+
+Following screen is from node1.
+
+<img src="/images/image04.png" width="90%" height="90%">   
+
+
+#### 4. Rotate Master Key
+Down the node3 and start the instance with --kmipRotateMasterKey option
+
+`````
+$ mongod -f /data/config/mongodb3.conf --kmipRotateMasterKey
+about to fork child process, waiting until server is ready for connections.
+forked process: 11925
+child process started successfully, parent exiting
+`````
+
+Check the key.store information.
+`````
+│   ├── WiredTigerPreplog.0000000001
+│   └── WiredTigerPreplog.0000000002
+├── key.store
+│   ├── 1paOQzMeHY0ArWQ1GXFTTfyu76CGXMIU
+│   │   ├── keystore.wt
+│   │   ├── WiredTiger
+│   │   ├── WiredTigerHS.wt
+│   │   ├── WiredTiger.lock
+│   │   ├── WiredTigerLog.0000000001
+│   │   ├── WiredTigerPreplog.0000000001
+│   │   ├── WiredTigerPreplog.0000000002
+│   │   ├── WiredTiger.turtle
+│   │   └── WiredTiger.wt
+│   └── keystore.metadata
+├── _mdb_catalog.wt
+├── mongod.lock
+`````
+The encryption information is changed, the data encryption key is encrypted with the new master key.
+
+
+
